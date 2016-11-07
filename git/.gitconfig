@@ -1,0 +1,43 @@
+[alias]
+    a = add
+    br = branch
+    ci = commit -v
+    co = checkout
+    di = diff
+    hist = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+    incoming = "!git remote update -p; git log ..@{u}"
+    l = log
+    last = log -1 HEAD
+    less = log -p --
+    ls = log --format="%C(bold\\ cyan)(%h)%C(bold\\ red)%d\\ %C(reset)%C(blue)(%an,\\ %cd)%n%C(reset)%s%n"
+    outgoing = log @{u}..
+    prune-local = !git branch --merged | grep -v \"^\\*\" | xargs git branch -d
+    s = status -sb
+    sm = submodule
+    st = status
+    stats = shortlog -sne
+    tree = log --graph --format="%C(cyan)(%h)%C(red)%d\\ %C(blue)(%an,\\ %cd)%n%C(reset)%s%n"
+    uci = reset --soft HEAD^
+    unstage = reset HEAD --
+    whatsnew = log HEAD@{1}..
+
+[color]
+    ui = auto
+
+[color "branch"]
+    current = bold cyan
+    local = cyan
+    remote = blue
+
+[color "interactive"]
+    prompt = bold cyan
+
+[core]
+    editor = vim
+    excludesfile = ~/.gitignore
+
+[push]
+    default = tracking
+
+[diff]
+    algorithm = patience
