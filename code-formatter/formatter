@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+
+set -e
+
+function usage() {
+  cat <<EOF
+Format files by using Intellij's format script:
+
+Usage: formatter -q [path1] [path2] [pathN]
+  -q No output
+  -h Help
+
+EOF
+exit 0
+}
+
+FORMATTER_HOME="$HOME/.formatter"
+CODE_STYLES="$FORMATTER_HOME/codestyles"
+LOG_FILE="$FORMATTER_HOME/formatter.log"
+
+white="\033[1;37m"
+green="\033[1;32m"
+blue="\033[1;34m"
+cyan='\033[1;36m'
+yellow='\033[1;33m'
+red="\033[1;31m"
+nc="\033[0m"
+
+while getopts qh opt; do
+  case $opt in
+    q)
+      function echo() {
+        builtin echo "" > /dev/null 2>&1
+      }
+
+      function printf() {
+        builtin printf "" > /dev/null 2>&1
+      }
+      ;;
+    h)
+      usage
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+function formatter_error() {
+  echo -e "${red}ERROR: ${1}${nc}" >/dev/stderr
+}
+
+if [ ${#@} -eq 0 ]; then
+  formatter_error "No files to format, exiting!"
+  exit 1
+fi
+
+# Create home directory
+if [ ! -f "$FORMATTER_HOME" ]; then
+  mkdir -p $FORMATTER_HOME
+fi
+
+# Create codestyles file
+if [ ! -f "$FORMATTER_HOME/codestyles" ]; then
+  cat > $CODE_STYLES << EOF
+#!/usr/bin/env bash
+
+# To add styleguides create a variable in this file with a valid path to the styleguide xml file.
+# The naming of the variable is important, it has to be: code_format__{file extension}
+# Ex: code_format__js="/absolute/path/to/js/style/guide.xml"
+
+EOF
+fi
+
+if [ -z "$IDE_BIN_HOME" ]; then
+  formatter_error "IDE_BIN_HOME not set, please add this as a environment variable"
+  exit 1;
+fi
+
+# Import codestyles
+. $CODE_STYLES
+
+function _spinner() {
+
+    local on_success="DONE"
+    local on_fail="FAIL"
+
+    case $1 in
+        start)
+            let column=44-${#2}
+            echo -ne "${white}${2}${nc}"
+            printf "%${column}s"
+
+            i=1
+            sp='\|/-'
+            delay=${SPINNER_DELAY:-0.15}
+
+            while :
+            do
+                printf "\b${sp:i++%${#sp}:1}"
+                sleep $delay
+            done
+            ;;
+        stop)
+            if [[ -z ${3} ]]; then
+                echo "spinner is not running.."
+                exit 1
+            fi
+
+            kill $3 > /dev/null 2>&1
+
+            echo -en "\b["
+            if [[ $2 -eq 0 ]]; then
+                echo -en "${green}${on_success}${nc}"
+            else
+                echo -en "${red}${on_fail}${nc}"
+            fi
+            echo -e "]"
+            ;;
+        *)
+            echo "invalid argument, try {start/stop}"
+            exit 1
+            ;;
+    esac
+}
+
+function start_spinner {
+    _spinner "start" "${1}" &
+    _sp_pid=$!
+    disown
+}
+
+function stop_spinner {
+    _spinner "stop" $1 $_sp_pid
+    unset _sp_pid
+}
+
+function formatFile() {
+  eval "$IDE_BIN_HOME/format.sh -s $@" > $LOG_FILE 2>&1
+}
+
+fileTypes=()
+settings=()
+skippedFileTypes=()
+
+for file in "$@"; do
+  if [ -e "$file" ]; then
+    filename=$(basename "$file")
+    extension="${filename##*.}"
+
+    if [[ ! " ${fileTypes[@]} " =~ " ${extension} " ]]; then
+      settingFileVariable="code_format__$extension"
+      settingsFilePath="${!settingFileVariable}"
+
+      if [ ! -z ${settingsFilePath} ]; then
+        fileTypes+=($extension)
+        settings+=($settingsFilePath)
+      else
+        skippedFileTypes+=($extension)
+      fi
+    fi
+  fi
+done
+
+if [ ${#fileTypes[@]} -eq 0 ]; then
+  formatter_error "Could not format files, either the files was not found or there was no configuration for the files extension"
+  exit 1
+fi
+
+echo -e "\n${white}################### Overview ####################${nc}"
+fileTypesText=${fileTypes[*]}
+echo -en "${white}Extensions:${nc}"
+printf "%$((38-${#fileTypesText}))s"
+echo -e "${white}${fileTypesText}${nc}"
+echo -e "${white}Files to format: \t\t\t\t${#@}${nc}"
+
+if [ ${#skippedFileTypes[@]} -gt 0 ]; then
+  skippedFileTypesText=${skippedFileTypes[*]}
+  echo -en "${white}Extensions skipped:${nc}"
+  printf "%$((30-${#skippedFileTypesText}))s"
+  echo -e "${white}${skippedFileTypesText}${nc}"
+fi
+
+echo -e "\n${white}################### Formatting ##################${nc}"
+
+counter=0
+files_formatted=0
+files_failed=0
+extensions_failed=()
+extensions_formatted=()
+
+for ext in ${fileTypes[@]}; do
+  file_list=""
+  files_to_format=0
+
+  for file in "$@"; do
+    if [[ "${file}" == *$ext ]]; then
+      file_list+="$file "
+      files_to_format=$((files_to_format+1))
+    fi
+  done
+
+  start_spinner "Formatting '$ext'-files:"
+  {
+    formatFile ${settings[counter]} $file_list
+  } && {
+    stop_spinner 0
+    files_formatted=$((files_formatted+files_to_format))
+    extensions_formatted+=($ext)
+  } || {
+    files_failed=$((files_failed+files_to_format))
+    extensions_failed+=($ext)
+    stop_spinner 1
+  }
+
+  counter=$((counter+1))
+done
+
+echo -e "\n${white}#################### Summary ####################${nc}"
+
+echo -e "${green}Files formatted: \t\t\t\t${files_formatted}${nc}"
+extensionsFormattedText=${extensions_formatted[*]}
+echo -en "${green}Extensions formatted:${nc}"
+printf "%$((28-${#extensionsFormattedText}))s"
+echo -e "${green}${extensionsFormattedText}${nc}"
+
+echo -e "${red}Files failed: \t\t\t\t\t${files_failed}${nc}"
+extensionsFailedText=${extensions_failed[*]}
+echo -en "${red}Extensions failed:${nc}"
+printf "%$((31-${#extensionsFailedText}))s"
+echo -e "${red}${extensionsFailedText}${nc}"
+
+if [ ${#skippedFileTypes[@]} -gt 0 ]; then
+  skippedFiles=$((${#@}-${files_formatted}-${files_failed}))
+  echo -e "${blue}Files skipped: \t\t\t\t\t${skippedFiles}${nc}"
+  echo -e "${blue}\n${skippedFiles} file(s) where skipped because there was no configuration found, see: $CODE_STYLES.${nc}"
+fi
+if [ ${#extensions_failed[@]} -gt 0 ]; then
+  echo -e "${red}\n${files_failed} file(s) failed, check logs in: $LOG_FILE.${nc}"
+fi
+
+printf "\n\n"

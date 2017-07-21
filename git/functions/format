@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+set -e
+
+cached=1
+while getopts c opt; do
+  case $opt in
+    c)
+      cached=0
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+nc="\033[0m"
+red="\033[1;31m"
+
+# Errorhandling
+function gitError() {
+  echo -e "${red}ERROR: ${1}${nc}" >/dev/stderr
+}
+
+# get absolute path of file
+function absolutePath() {
+  DIR=$(cd "$(dirname "$1")"; pwd)
+  FILE=$(basename "$1")
+  echo "$DIR/$FILE"
+}
+
+# Check if formatter is installed
+if ! type formatter > /dev/null 2>&1; then
+  gitError "Formatter not found, please install formatter"
+  exit 1
+fi
+
+# Check if inside a git repository
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+  gitError "Not inside a git repository"
+  exit 1
+fi
+
+# Loop through files with changes and format them
+if [ $cached -eq 1 ]; then
+  gitFileChanges=$(git diff --cached --name-only)
+else
+  gitFileChanges=$(git ls-files -om --exclude-standard)
+fi
+
+files=""
+for file in $gitFileChanges; do
+  path=$(absolutePath $file)
+  files+=" $path"
+done
+
+if [ -n "$files" ]; then
+  formatter $files
+  git diff --color=always | less -R
+
+  if [ $cached -eq 1 ]; then
+    git add .
+  fi
+elif [ $cached -eq 0 ]; then
+  gitError "No files to format"
+fi
